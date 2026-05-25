@@ -10,11 +10,14 @@ const {
   TextInputStyle,
   ActionRowBuilder,
   ChannelType,
+  ButtonBuilder,
+  ButtonStyle,
 } = require('discord.js');
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const STAFF_ROLE_NAME = 'AT | 𝐀𝐝𝐦𝐢𝐧𝐬𝐭𝐫𝐚𝐭𝐢𝐨𝐧 𝐓𝐞𝐚𝐦';
+const POLICE_ROLE_NAME = 'PD | 𝐏𝐨𝐥𝐢𝐜𝐞 𝐃𝐞𝐩𝐚𝐫𝐭𝐦𝐞𝐧𝐭';
 
 const client = new Client({
   intents: [
@@ -30,8 +33,8 @@ const guildSettings = {};
 
 const commands = [
   new SlashCommandBuilder()
-    .setName('register')
-    .setDescription('Register your license plate')
+    .setName('setupregister')
+    .setDescription('Post the registration button message (Staff only)')
     .toJSON(),
 
   new SlashCommandBuilder()
@@ -105,7 +108,7 @@ client.once('ready', async () => {
 });
 
 function isStaff(member) {
-  return member.roles.cache.some(r => r.name === STAFF_ROLE_NAME);
+  return member.roles.cache.some(r => r.name === STAFF_ROLE_NAME || r.name === POLICE_ROLE_NAME);
 }
 
 function formatDate() {
@@ -148,26 +151,44 @@ async function updateForumPost(reg) {
 
 client.on('interactionCreate', async interaction => {
 
+  // ── Button Click ──
+  if (interaction.isButton() && interaction.customId === 'open_register') {
+    if (registrations[interaction.user.id]) {
+      return interaction.reply({ content: `❌ You already have a registered plate: **${registrations[interaction.user.id].plate}**. You cannot register twice.`, ephemeral: true });
+    }
+    const modal = new ModalBuilder()
+      .setCustomId('register_modal')
+      .setTitle('🪪 License Plate Registration');
+    const plateInput = new TextInputBuilder()
+      .setCustomId('plate')
+      .setLabel('Custom Plate Number (max 5 characters)')
+      .setPlaceholder('e.g. MSR12')
+      .setMaxLength(5)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+    modal.addComponents(new ActionRowBuilder().addComponents(plateInput));
+    await interaction.showModal(modal);
+    return;
+  }
+
+  // ── Slash Commands ──
   if (interaction.isChatInputCommand()) {
     const { commandName } = interaction;
 
-    if (commandName === 'register') {
-      if (registrations[interaction.user.id]) {
-        return interaction.reply({ content: `❌ You already have a registered plate: **${registrations[interaction.user.id].plate}**. You cannot register twice.`, ephemeral: true });
-      }
-      const modal = new ModalBuilder()
-        .setCustomId('register_modal')
-        .setTitle('🪪 License Plate Registration');
-      const plateInput = new TextInputBuilder()
-        .setCustomId('plate')
-        .setLabel('Custom Plate Number (max 5 characters)')
-        .setPlaceholder('e.g. MSR12')
-        .setMaxLength(5)
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-      modal.addComponents(new ActionRowBuilder().addComponents(plateInput));
-      await interaction.showModal(modal);
-      return;
+    if (commandName === 'setupregister') {
+      if (!isStaff(interaction.member)) return interaction.reply({ content: '❌ No permission.', ephemeral: true });
+      const button = new ButtonBuilder()
+        .setCustomId('open_register')
+        .setLabel('🪪 Register Plate')
+        .setStyle(ButtonStyle.Success);
+      const row = new ActionRowBuilder().addComponents(button);
+     const embed = new EmbedBuilder()
+        .setTitle('🪪 │ 𝖣𝖱𝖨𝖵𝖤𝖱𝖲 𝖫𝖨𝖢𝖤𝖭𝖲𝖤 𝖱𝖤𝖦𝖨𝖲𝖳𝖱𝖠𝖳𝖨𝖮𝖭')
+        .setDescription('**Register your license and vehicle tags below before hitting the road**\n\n**Rules:**\n• One plate per person\n• Max 5 characters\n• Letters and numbers only')
+        .setColor('#00FF7F')
+        .setFooter({ text: 'Maryland State Roleplay • License Plate Registry' });
+      await interaction.channel.send({ embeds: [embed], components: [row] });
+      return interaction.reply({ content: '✅ Registration message posted!', ephemeral: true });
     }
 
     if (commandName === 'setchannel') {
@@ -231,6 +252,7 @@ client.on('interactionCreate', async interaction => {
     }
   }
 
+  // ── Modal Submit ──
   if (interaction.isModalSubmit() && interaction.customId === 'register_modal') {
     const plate = interaction.fields.getTextInputValue('plate').toUpperCase().replace(/[^A-Z0-9]/g, '');
 
