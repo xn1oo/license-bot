@@ -94,6 +94,14 @@ const commands = [
       opt.setName('custom_violation').setDescription('Custom violation (only if Custom selected)').setRequired(false)
     )
     .toJSON(),
+
+  new SlashCommandBuilder()
+    .setName('deleteplate')
+    .setDescription('Delete a license plate registration (Staff only)')
+    .addStringOption(opt =>
+      opt.setName('plate').setDescription('The plate to delete').setRequired(true)
+    )
+    .toJSON(),
 ];
 
 client.once('ready', async () => {
@@ -182,7 +190,7 @@ client.on('interactionCreate', async interaction => {
         .setLabel('🪪 Register Plate')
         .setStyle(ButtonStyle.Success);
       const row = new ActionRowBuilder().addComponents(button);
-     const embed = new EmbedBuilder()
+      const embed = new EmbedBuilder()
         .setTitle('🪪 │ 𝖣𝖱𝖨𝖵𝖤𝖱𝖲 𝖫𝖨𝖢𝖤𝖭𝖲𝖤 𝖱𝖤𝖦𝖨𝖲𝖳𝖱𝖠𝖳𝖨𝖮𝖭')
         .setDescription('**Register your license and vehicle tags below before hitting the road**\n\n**Rules:**\n• One plate per person\n• Max 5 characters\n• Letters and numbers only')
         .setColor('#00FF7F')
@@ -249,6 +257,16 @@ client.on('interactionCreate', async interaction => {
       reg.violations.push(violation);
       await updateForumPost(reg);
       return interaction.reply({ content: `✅ Violation **${violation.type}** added to plate **${plate}**`, ephemeral: true });
+    }
+
+    if (commandName === 'deleteplate') {
+      if (!isStaff(interaction.member)) return interaction.reply({ content: '❌ No permission.', ephemeral: true });
+      const plate = interaction.options.getString('plate').toUpperCase();
+      const userId = plates[plate];
+      if (!userId || !registrations[userId]) return interaction.reply({ content: `❌ No registration found for plate **${plate}**`, ephemeral: true });
+      delete registrations[userId];
+      delete plates[plate];
+      return interaction.reply({ content: `✅ Plate **${plate}** has been deleted successfully!`, ephemeral: true });
     }
   }
 
