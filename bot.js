@@ -75,24 +75,6 @@ const commands = [
   new SlashCommandBuilder()
     .setName('addviolation')
     .setDescription('Add a violation to a plate (Staff only)')
-    .addStringOption(opt =>
-      opt.setName('plate').setDescription('The plate to add violation to').setRequired(true)
-    )
-    .addStringOption(opt =>
-      opt.setName('violation')
-        .setDescription('Type of violation')
-        .setRequired(true)
-        .addChoices(
-          { name: '🚨 Speeding Ticket', value: '🚨 Speeding Ticket' },
-          { name: '🚔 Reckless Driving', value: '🚔 Reckless Driving' },
-          { name: '🚓 Evading Police', value: '🚓 Evading Police' },
-          { name: '🅿️ Illegal Parking', value: '🅿️ Illegal Parking' },
-          { name: '✏️ Custom', value: 'custom' },
-        )
-    )
-    .addStringOption(opt =>
-      opt.setName('custom_violation').setDescription('Custom violation (only if Custom selected)').setRequired(false)
-    )
     .toJSON(),
 
   new SlashCommandBuilder()
@@ -128,19 +110,30 @@ function formatDate() {
 
 function buildRegistrationEmbed(reg) {
   const statusEmoji = reg.status === 'Active' ? '🟢' : '🔴';
-  const violationList = reg.violations.length > 0
-    ? reg.violations.map(v => `${v.type}\n📅 ${v.date} — Added by **${v.addedBy}**`).join('\n\n')
-    : 'None';
+
+  let violationText = '';
+  if (reg.violations.length === 0) {
+    violationText = '```\nNone\n```';
+  } else {
+    violationText = reg.violations.map((v, i) =>
+      `**#${i + 1}** ${v.type}\n` +
+      `⏳ Time Served: **${v.timeServed}**\n` +
+      `📅 ${v.date} — Added by **${v.addedBy}**`
+    ).join('\n\n');
+  }
 
   return new EmbedBuilder()
-    .setTitle(`🪪 ${reg.username}`)
+    .setTitle(`🪪  ${reg.robloxUsername}`)
     .setColor(reg.status === 'Active' ? '#00FF7F' : '#FF4444')
     .addFields(
+      { name: '━━━━━━━━━━━━━━━━━━━━━━', value: '\u200B', inline: false },
       { name: '🔤  PLATE', value: `\`\`\`\n${reg.plate}\n\`\`\``, inline: true },
       { name: `${statusEmoji}  STATUS`, value: `\`\`\`\n${reg.status}\n\`\`\``, inline: true },
       { name: '\u200B', value: '\u200B', inline: false },
       { name: '📅  REGISTERED', value: `\`\`\`\n${reg.date}\n\`\`\``, inline: false },
-      { name: '📋  VIOLATIONS', value: violationList, inline: false },
+      { name: '━━━━━━━━━━━━━━━━━━━━━━', value: '\u200B', inline: false },
+      { name: '📋  VIOLATIONS', value: violationText, inline: false },
+      { name: '━━━━━━━━━━━━━━━━━━━━━━', value: '\u200B', inline: false },
     )
     .setFooter({ text: 'Maryland State Roleplay • License Plate Registry' });
 }
@@ -149,9 +142,9 @@ async function updateForumPost(reg) {
   if (!reg.forumPostId) return;
   try {
     const thread = await client.channels.fetch(reg.forumPostId);
-    const messages = await thread.messages.fetch({ limit: 1 });
-    const firstMsg = messages.last();
-    if (firstMsg) await firstMsg.edit({ embeds: [buildRegistrationEmbed(reg)] });
+    const messages = await thread.messages.fetch({ limit: 10 });
+    const botMsg = messages.find(m => m.author.id === client.user.id && m.embeds.length > 0);
+    if (botMsg) await botMsg.edit({ embeds: [buildRegistrationEmbed(reg)] });
   } catch (e) {
     console.error('Failed to update forum post:', e);
   }
@@ -162,11 +155,23 @@ client.on('interactionCreate', async interaction => {
   // ── Button Click ──
   if (interaction.isButton() && interaction.customId === 'open_register') {
     if (registrations[interaction.user.id]) {
-      return interaction.reply({ content: `❌ You already have a registered plate: **${registrations[interaction.user.id].plate}**. You cannot register twice.`, ephemeral: true });
+      return interaction.reply({
+        content: `❌ You already have a registered plate: **${registrations[interaction.user.id].plate}**. You cannot register twice.`,
+        ephemeral: true
+      });
     }
+
     const modal = new ModalBuilder()
       .setCustomId('register_modal')
       .setTitle('🪪 License Plate Registration');
+
+    const robloxInput = new TextInputBuilder()
+      .setCustomId('roblox')
+      .setLabel('Roblox Username')
+      .setPlaceholder('Enter your exact Roblox username')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
     const plateInput = new TextInputBuilder()
       .setCustomId('plate')
       .setLabel('Custom Plate Number (max 5 characters)')
@@ -174,7 +179,20 @@ client.on('interactionCreate', async interaction => {
       .setMaxLength(5)
       .setStyle(TextInputStyle.Short)
       .setRequired(true);
-    modal.addComponents(new ActionRowBuilder().addComponents(plateInput));
+
+    const warningInput = new TextInputBuilder()
+      .setCustomId('warning_ack')
+      .setLabel('Type AGREE to acknowledge the warning')
+      .setPlaceholder('⚠️ FALSE ROBLOX USERNAME = PERMANENT BAN. Type AGREE')
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(robloxInput),
+      new ActionRowBuilder().addComponents(plateInput),
+      new ActionRowBuilder().addComponents(warningInput),
+    );
+
     await interaction.showModal(modal);
     return;
   }
@@ -192,7 +210,14 @@ client.on('interactionCreate', async interaction => {
       const row = new ActionRowBuilder().addComponents(button);
       const embed = new EmbedBuilder()
         .setTitle('🪪 │ 𝖣𝖱𝖨𝖵𝖤𝖱𝖲 𝖫𝖨𝖢𝖤𝖭𝖲𝖤 𝖱𝖤𝖦𝖨𝖲𝖳𝖱𝖠𝖳𝖨𝖮𝖭')
-        .setDescription('**Register your license and vehicle tags below before hitting the road**\n\n**Rules:**\n• One plate per person\n• Max 5 characters\n• Letters and numbers only')
+        .setDescription(
+          '**Register your license and vehicle tags below before hitting the road**\n\n' +
+          '**Rules:**\n' +
+          '• One plate per person\n' +
+          '• Max 5 characters\n' +
+          '• Letters and numbers only\n\n' +
+          '⚠️ **WARNING:** If we find out you put a false Roblox username this will result in an **immediate permanent ban** from the Discord server.'
+        )
         .setColor('#00FF7F')
         .setFooter({ text: 'Maryland State Roleplay • License Plate Registry' });
       await interaction.channel.send({ embeds: [embed], components: [row] });
@@ -240,23 +265,40 @@ client.on('interactionCreate', async interaction => {
 
     if (commandName === 'addviolation') {
       if (!isStaff(interaction.member)) return interaction.reply({ content: '❌ No permission.', ephemeral: true });
-      const plate = interaction.options.getString('plate').toUpperCase();
-      const violationType = interaction.options.getString('violation');
-      const customViolation = interaction.options.getString('custom_violation');
-      if (violationType === 'custom' && !customViolation) {
-        return interaction.reply({ content: '❌ Please provide a custom violation description.', ephemeral: true });
-      }
-      const userId = plates[plate];
-      if (!userId || !registrations[userId]) return interaction.reply({ content: `❌ No registration found for plate **${plate}**`, ephemeral: true });
-      const reg = registrations[userId];
-      const violation = {
-        type: violationType === 'custom' ? `✏️ ${customViolation}` : violationType,
-        date: formatDate(),
-        addedBy: interaction.user.username,
-      };
-      reg.violations.push(violation);
-      await updateForumPost(reg);
-      return interaction.reply({ content: `✅ Violation **${violation.type}** added to plate **${plate}**`, ephemeral: true });
+
+      const modal = new ModalBuilder()
+        .setCustomId('violation_modal')
+        .setTitle('📋 Add Violation');
+
+      const plateInput = new TextInputBuilder()
+        .setCustomId('plate')
+        .setLabel('License Plate')
+        .setPlaceholder('Enter the license plate number')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+      const violationInput = new TextInputBuilder()
+        .setCustomId('violation')
+        .setLabel('Violation')
+        .setPlaceholder('Describe the violation')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
+
+      const timeInput = new TextInputBuilder()
+        .setCustomId('timeServed')
+        .setLabel('Time Served')
+        .setPlaceholder('e.g. 10 minutes, 1 hour, None')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+      modal.addComponents(
+        new ActionRowBuilder().addComponents(plateInput),
+        new ActionRowBuilder().addComponents(violationInput),
+        new ActionRowBuilder().addComponents(timeInput),
+      );
+
+      await interaction.showModal(modal);
+      return;
     }
 
     if (commandName === 'deleteplate') {
@@ -270,9 +312,15 @@ client.on('interactionCreate', async interaction => {
     }
   }
 
-  // ── Modal Submit ──
+  // ── Modal Submit — Register ──
   if (interaction.isModalSubmit() && interaction.customId === 'register_modal') {
+    const robloxUsername = interaction.fields.getTextInputValue('roblox').trim();
     const plate = interaction.fields.getTextInputValue('plate').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const ack = interaction.fields.getTextInputValue('warning_ack').trim().toUpperCase();
+
+    if (ack !== 'AGREE') {
+      return interaction.reply({ content: '❌ You must type **AGREE** to acknowledge the warning.', ephemeral: true });
+    }
 
     if (plate.length === 0) return interaction.reply({ content: '❌ Plate must contain letters or numbers only.', ephemeral: true });
     if (registrations[interaction.user.id]) return interaction.reply({ content: `❌ You already have a registered plate: **${registrations[interaction.user.id].plate}**`, ephemeral: true });
@@ -281,12 +329,13 @@ client.on('interactionCreate', async interaction => {
     await interaction.deferReply({ ephemeral: true });
 
     const settings = guildSettings[interaction.guildId];
-    if (!settings || !settings.regChannelId) {
-      return interaction.editReply({ content: '❌ Registration channel has not been set up yet. Ask a staff member to run /setchannel.' });
+    if (!settings || !settings.forumChannelId) {
+      return interaction.editReply({ content: '❌ Forum channel has not been set up yet. Ask a staff member to run /setchannelmodviewer.' });
     }
 
     const reg = {
       plate,
+      robloxUsername,
       username: interaction.user.username,
       userId: interaction.user.id,
       date: formatDate(),
@@ -299,26 +348,43 @@ client.on('interactionCreate', async interaction => {
     plates[plate] = interaction.user.id;
 
     try {
-      const regChannel = await client.channels.fetch(settings.regChannelId);
-      await regChannel.send({ embeds: [buildRegistrationEmbed(reg)] });
+      const forumChannel = await client.channels.fetch(settings.forumChannelId);
+      const thread = await forumChannel.threads.create({
+        name: `${robloxUsername} — ${plate}`,
+        message: { embeds: [buildRegistrationEmbed(reg)] },
+      });
+      reg.forumPostId = thread.id;
     } catch (e) {
-      console.error('Failed to post in registration channel:', e);
+      console.error('Failed to create forum post:', e);
     }
 
-    if (settings.forumChannelId) {
-      try {
-        const forumChannel = await client.channels.fetch(settings.forumChannelId);
-        const thread = await forumChannel.threads.create({
-          name: `${reg.username} — ${plate}`,
-          message: { embeds: [buildRegistrationEmbed(reg)] },
-        });
-        reg.forumPostId = thread.id;
-      } catch (e) {
-        console.error('Failed to create forum post:', e);
-      }
+    await interaction.editReply({
+      content: `✅ Your plate **${plate}** has been registered successfully under Roblox username **${robloxUsername}**!`
+    });
+  }
+
+  // ── Modal Submit — Add Violation ──
+  if (interaction.isModalSubmit() && interaction.customId === 'violation_modal') {
+    const plate = interaction.fields.getTextInputValue('plate').toUpperCase().trim();
+    const violationType = interaction.fields.getTextInputValue('violation').trim();
+    const timeServed = interaction.fields.getTextInputValue('timeServed').trim();
+
+    const userId = plates[plate];
+    if (!userId || !registrations[userId]) {
+      return interaction.reply({ content: `❌ No registration found for plate **${plate}**`, ephemeral: true });
     }
 
-    await interaction.editReply({ content: `✅ Your plate **${plate}** has been registered successfully!` });
+    const reg = registrations[userId];
+    const violation = {
+      type: violationType,
+      timeServed,
+      date: formatDate(),
+      addedBy: interaction.user.username,
+    };
+    reg.violations.push(violation);
+    await updateForumPost(reg);
+
+    return interaction.reply({ content: `✅ Violation added to plate **${plate}**`, ephemeral: true });
   }
 });
 
