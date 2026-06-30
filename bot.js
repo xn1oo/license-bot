@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const {
   Client,
   GatewayIntentBits,
@@ -16,8 +18,54 @@ const {
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
-const STAFF_ROLE_NAME = 'AT | 𝐀𝐝𝐦𝐢𝐧𝐬𝐭𝐫𝐚𝐭𝐢𝐨𝐧 𝐓𝐞𝐚𝐦';
+const STAFF_ROLE_NAMES = [
+  'AT | 𝐀𝐝𝐦𝐢𝐧𝐬𝐭𝐫𝐚𝐭𝐢𝐨𝐧 𝐓𝐞𝐚𝐦',
+  'M | 𝐎𝐟𝐟𝐢𝐜𝐢𝐚𝐥 𝐌𝐨𝐝𝐞𝐫𝐚𝐭𝐢𝐨𝐧',
+  'SM | 𝐒𝐞𝐧𝐢𝐨𝐫 𝐌𝐨𝐝𝐞𝐫𝐚𝐭𝐨𝐫',
+  'A | 𝐀𝐝𝐦𝐢𝐧𝐬𝐭𝐫𝐚𝐭𝐢𝐨𝐧',
+];
 const POLICE_ROLE_NAME = 'PD | 𝐏𝐨𝐥𝐢𝐜𝐞 𝐃𝐞𝐩𝐚𝐫𝐭𝐦𝐞𝐧𝐭';
+
+// ── Persistent storage ──
+// IMPORTANT: On Railway, this path needs to live on a mounted Volume,
+// otherwise the file itself gets wiped on every redeploy too.
+// Set DATA_DIR env var to your volume's mount path (e.g. /data).
+const DATA_DIR = process.env.DATA_DIR || __dirname;
+const DATA_FILE = path.join(DATA_DIR, 'data.json');
+
+let registrations = {};
+let plates = {};
+let guildSettings = {};
+
+function loadData() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const raw = fs.readFileSync(DATA_FILE, 'utf8');
+      const parsed = JSON.parse(raw);
+      registrations = parsed.registrations || {};
+      plates = parsed.plates || {};
+      guildSettings = parsed.guildSettings || {};
+      console.log(`✅ Loaded data from ${DATA_FILE} (${Object.keys(registrations).length} registrations)`);
+    } else {
+      console.log(`ℹ️ No existing data file at ${DATA_FILE}, starting fresh.`);
+    }
+  } catch (e) {
+    console.error('❌ Failed to load data file:', e);
+  }
+}
+
+function saveData() {
+  try {
+    fs.writeFileSync(
+      DATA_FILE,
+      JSON.stringify({ registrations, plates, guildSettings }, null, 2)
+    );
+  } catch (e) {
+    console.error('❌ Failed to save data file:', e);
+  }
+}
+
+loadData();
 
 const client = new Client({
   intents: [
@@ -26,10 +74,6 @@ const client = new Client({
     GatewayIntentBits.MessageContent,
   ],
 });
-
-const registrations = {};
-const plates = {};
-const guildSettings = {};
 
 const commands = [
   new SlashCommandBuilder()
@@ -98,7 +142,7 @@ client.once('ready', async () => {
 });
 
 function isStaff(member) {
-  return member.roles.cache.some(r => r.name === STAFF_ROLE_NAME || r.name === POLICE_ROLE_NAME);
+  return member.roles.cache.some(r => STAFF_ROLE_NAMES.includes(r.name) || r.name === POLICE_ROLE_NAME);
 }
 
 function formatDate() {
@@ -229,6 +273,7 @@ client.on('interactionCreate', async interaction => {
       const channel = interaction.options.getChannel('channel');
       if (!guildSettings[interaction.guildId]) guildSettings[interaction.guildId] = {};
       guildSettings[interaction.guildId].regChannelId = channel.id;
+      saveData();
       return interaction.reply({ content: `✅ Registration channel set to ${channel}`, ephemeral: true });
     }
 
@@ -240,6 +285,7 @@ client.on('interactionCreate', async interaction => {
       }
       if (!guildSettings[interaction.guildId]) guildSettings[interaction.guildId] = {};
       guildSettings[interaction.guildId].forumChannelId = channel.id;
+      saveData();
       return interaction.reply({ content: `✅ Mod viewer forum set to ${channel}`, ephemeral: true });
     }
 
@@ -259,6 +305,7 @@ client.on('interactionCreate', async interaction => {
       if (!userId || !registrations[userId]) return interaction.reply({ content: `❌ No registration found for plate **${plate}**`, ephemeral: true });
       const reg = registrations[userId];
       reg.status = `Suspended — ${reason}`;
+      saveData();
       await updateForumPost(reg);
       return interaction.reply({ content: `✅ Plate **${plate}** revoked. Reason: ${reason}`, ephemeral: true });
     }
@@ -308,6 +355,7 @@ client.on('interactionCreate', async interaction => {
       if (!userId || !registrations[userId]) return interaction.reply({ content: `❌ No registration found for plate **${plate}**`, ephemeral: true });
       delete registrations[userId];
       delete plates[plate];
+      saveData();
       return interaction.reply({ content: `✅ Plate **${plate}** has been deleted successfully!`, ephemeral: true });
     }
   }
@@ -346,6 +394,7 @@ client.on('interactionCreate', async interaction => {
 
     registrations[interaction.user.id] = reg;
     plates[plate] = interaction.user.id;
+    saveData();
 
     try {
       const forumChannel = await client.channels.fetch(settings.forumChannelId);
@@ -354,6 +403,7 @@ client.on('interactionCreate', async interaction => {
         message: { embeds: [buildRegistrationEmbed(reg)] },
       });
       reg.forumPostId = thread.id;
+      saveData();
     } catch (e) {
       console.error('Failed to create forum post:', e);
     }
@@ -382,6 +432,7 @@ client.on('interactionCreate', async interaction => {
       addedBy: interaction.user.username,
     };
     reg.violations.push(violation);
+    saveData();
     await updateForumPost(reg);
 
     return interaction.reply({ content: `✅ Violation added to plate **${plate}**`, ephemeral: true });
