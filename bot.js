@@ -194,7 +194,29 @@ async function updateForumPost(reg) {
   }
 }
 
+process.on('unhandledRejection', (reason) => {
+  console.error('⚠️ Unhandled promise rejection (bot stayed alive):', reason);
+});
+
 client.on('interactionCreate', async interaction => {
+  try {
+    await handleInteraction(interaction);
+  } catch (err) {
+    console.error('⚠️ Error handling interaction:', err);
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply({ content: '❌ Something went wrong processing that.' });
+      } else {
+        await interaction.reply({ content: '❌ Something went wrong processing that.', ephemeral: true });
+      }
+    } catch (e) {
+      // Interaction likely expired — nothing more we can do, but don't crash.
+      console.error('⚠️ Could not send error reply (interaction probably expired):', e.message);
+    }
+  }
+});
+
+async function handleInteraction(interaction) {
 
   // ── Button Click ──
   if (interaction.isButton() && interaction.customId === 'open_register') {
@@ -437,6 +459,6 @@ client.on('interactionCreate', async interaction => {
 
     return interaction.reply({ content: `✅ Violation added to plate **${plate}**`, ephemeral: true });
   }
-});
+}
 
 client.login(TOKEN);
